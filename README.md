@@ -135,22 +135,19 @@ Works with any workspace layout — flat projects, ROS2 packages, multi-package 
 
 ---
 
-## Troubleshooting
-
-**Models appear missing on first run:**
-```bash
-rm -rf ~/.gz/sim ~/.ignition/gazebo
-python3 my_world.gzworld
-```
-
-The bundler does this automatically since v1.0 — only needed if running an older bundle.
-
 ---
 
 ## Roadmap
 
+- [ ] Heightmap support (`<heightmap><uri>` — `.png`, `.dem`, `.tif`)
+- [ ] Actor animation support (`<actor><animation><filename>` — `.bvh`)
+- [ ] Ogre `.material` script support
+- [ ] Absolute path rewriting inside packed `model.sdf` files
+- [ ] Full URI rewrite pass on all SDF files inside the bundle (not just world.sdf)
+
 - [ ] `package://` URI support (ROS2 packages)
 - [ ] Native `gz sim my_world.gzworld` support (upstream gz-sim PR)
+
 - [ ] Custom binary format with magic header (`.glb`-style)
 - [ ] GUI wrapper
 
