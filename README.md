@@ -136,20 +136,23 @@ Works with any workspace layout — flat projects, ROS2 packages, multi-package 
 ---
 
 ---
-
 ## Roadmap
 
+### High priority
+- [ ] Rename `.gzworld` to `.sdfz` (TGC suggestion, follows `.usdz` convention)
+- [ ] ZIP_STORED uncompressed (like `.usdz`); direct mmap, no `/tmp` extraction
+- [ ] Accept world.sdf or model.sdf: same command, same tool
+- [ ] Full URI rewrite on all SDF files inside the bundle
+      (also fixes absolute paths from `generate_world_sdf` service)
+
+### Coverage
 - [ ] Heightmap support (`<heightmap><uri>` — `.png`, `.dem`, `.tif`)
 - [ ] Actor animation support (`<actor><animation><filename>` — `.bvh`)
 - [ ] Ogre `.material` script support
-- [ ] Absolute path rewriting inside packed `model.sdf` files
-- [ ] Full URI rewrite pass on all SDF files inside the bundle (not just world.sdf)
 
+### Ecosystem
 - [ ] `package://` URI support (ROS2 packages)
-- [ ] Native `gz sim my_world.gzworld` support (upstream gz-sim PR)
-
-- [ ] Custom binary format with magic header (`.glb`-style)
-- [ ] GUI wrapper
+- [ ] Native `gz sim world.sdfz` support (upstream PR)
 
 ---
 
