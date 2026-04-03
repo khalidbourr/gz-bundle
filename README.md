@@ -2,9 +2,7 @@
 
 **Portable Gazebo world bundler — one file, zero setup.**
 
-Pack any Gazebo SDF world + all its assets (meshes, PBR textures, models, plugins) into a single self-executable `.gzworld` file. Your colleague runs it with one command, no workspace setup required.
-
-Inspired by the `.glb` single-file approach for 3D assets — applied to full simulation environments.
+Pack any Gazebo SDF world + all its assets (meshes, PBR textures, models, plugins) into a single self-executable `.sdfz` file. Your colleague runs it with one command, no workspace setup required.
 
 ---
 
@@ -19,10 +17,10 @@ Sharing a Gazebo world today means:
 
 ```bash
 # You — pack your world
-python3 gz_bundle.py worlds/forest_world.world -o forest3d.gzworld
+python3 gz_bundle.py worlds/forest_world.world -o forest3d.sdfz
 
 # Colleague — run it, zero setup
-python3 forest3d.gzworld
+python3 forest3d.sdfz
 ```
 
 That's it. One file. Any machine. Any workspace.
@@ -31,13 +29,13 @@ That's it. One file. Any machine. Any workspace.
 
 ## What gets bundled
 
-- ✅ SDF world file (URIs rewritten to relative paths)
-- ✅ All referenced models (full directory trees)
-- ✅ Meshes — `.dae`, `.obj`, `.stl`, `.glb`, `.gltf`
-- ✅ PBR textures — albedo, normal, roughness, metalness, emissive maps
-- ✅ Custom plugins — `.so` (best-effort, platform-specific)
-- ✅ `gz_bundle.py` itself — embedded inside the bundle for repacking
-- ✅ Manifest — `manifest.json` listing all assets and URI rewrites
+- SDF world file (URIs rewritten to relative paths)
+- All referenced models (full directory trees)
+- Meshes — `.dae`, `.obj`, `.stl`, `.glb`, `.gltf`
+- PBR textures — albedo, normal, roughness, metalness, emissive maps
+- Custom plugins — `.so` (best-effort, platform-specific)
+- `gz_bundle.py` itself — embedded inside the bundle for repacking
+- Manifest — `manifest.json` listing all assets and URI rewrites
 
 ---
 
@@ -50,6 +48,7 @@ That's it. One file. Any machine. Any workspace.
 **Runner (colleague):**
 - Python 3.6+
 - Gazebo installed
+- `fuse-zip` (optional, enables zero-copy mount instead of extraction)
 
 No extra Python packages. Pure stdlib.
 
@@ -60,28 +59,28 @@ No extra Python packages. Pure stdlib.
 ### Pack a world
 
 ```bash
-python3 gz_bundle.py worlds/my_world.sdf -o my_world.gzworld
+python3 gz_bundle.py worlds/my_world.sdf -o my_world.sdfz
 ```
 
 Verbose mode (shows every asset packed):
 ```bash
-python3 gz_bundle.py worlds/my_world.sdf -o my_world.gzworld --verbose
+python3 gz_bundle.py worlds/my_world.sdf -o my_world.sdfz --verbose
 ```
 
 ### Run a bundle
 
 ```bash
 # Self-executing — no gz_bundle.py needed
-python3 my_world.gzworld
+python3 my_world.sdfz
 
 # Or via gz_bundle.py
-python3 gz_bundle.py --run my_world.gzworld
+python3 gz_bundle.py --run my_world.sdfz
 ```
 
 ### Pass extra args to gz sim
 
 ```bash
-python3 my_world.gzworld -- -v
+python3 my_world.sdfz -- -v
 ```
 
 ---
@@ -89,8 +88,8 @@ python3 my_world.gzworld -- -v
 ## How it works
 
 ```
-my_world.gzworld  (zip archive)
-├── __main__.py          ← self-run bootstrap (python3 my_world.gzworld)
+my_world.sdfz  (ZIP_STORED, uncompressed)
+├── __main__.py          ← self-run bootstrap (python3 my_world.sdfz)
 ├── gz_bundle.py         ← bundler script embedded for repacking
 ├── world.sdf            ← rewritten SDF (all URIs → relative)
 ├── manifest.json        ← asset list + URI rewrite map
@@ -111,7 +110,7 @@ my_world.gzworld  (zip archive)
     └── libgz_terramechanics.so
 ```
 
-At run time the bundle extracts to a temp directory, sets all required environment variables, clears the gz-sim resource cache to avoid stale path conflicts, and launches `gz sim`. The temp directory is cleaned up automatically on exit.
+The archive uses `ZIP_STORED` (uncompressed) so entries can be memory-mapped directly. At run time the bundle mounts via `fuse-zip` (zero-copy, read-only) or falls back to extraction if `fuse-zip` is not installed. Environment variables are set automatically and the mount/temp directory is cleaned up on exit.
 
 ---
 
@@ -135,12 +134,11 @@ Works with any workspace layout — flat projects, ROS2 packages, multi-package 
 
 ---
 
----
 ## Roadmap
 
 ### High priority
-- [ ] Rename `.gzworld` to `.sdfz` (TGC suggestion, follows `.usdz` convention)
-- [ ] ZIP_STORED uncompressed (like `.usdz`); direct mmap, no `/tmp` extraction
+- [x] ~~Rename `.gzworld` to `.sdfz`~~
+- [x] ~~ZIP_STORED uncompressed; fuse-zip mount, no `/tmp` extraction~~
 - [ ] Accept world.sdf or model.sdf: same command, same tool
 - [ ] Full URI rewrite on all SDF files inside the bundle
       (also fixes absolute paths from `generate_world_sdf` service)
