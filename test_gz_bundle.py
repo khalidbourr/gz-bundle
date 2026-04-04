@@ -404,7 +404,6 @@ class TestAssetNameCollision:
 # --- Nested include --------------------------------------------------------
 
 class TestNestedInclude:
-    @pytest.mark.xfail(reason="crawler does not yet recurse into model.sdf inside directory includes")
     def test_recursive_include_collects_inner_model(self, tmp_path, clean_env):
         """Model A's model.sdf includes model B — crawler should collect both."""
         (tmp_path / ".git").mkdir()
@@ -588,3 +587,89 @@ class TestModelBundle:
 
         with zipfile.ZipFile(output, "r") as zf:
             assert "world.sdf" not in zf.namelist()
+
+
+# --- Nested SDF URI rewriting ----------------------------------------------
+
+class TestNestedSDFRewrite:
+    def test_nested_model_sdf_gets_rewritten(self, tmp_path, clean_env):
+        """model.sdf inside a bundled directory should have its URIs rewritten."""
+        import zipfile
+
+        (tmp_path / ".git").mkdir()
+
+        # Model with an absolute path in its model.sdf
+        robot = tmp_path / "models" / "robot"
+        meshes = robot / "meshes"
+        meshes.mkdir(parents=True)
+        (meshes / "body.dae").write_text("")
+
+        abs_mesh_path = str(meshes / "body.dae")
+        (robot / "model.sdf").write_text(f"""\
+<?xml version="1.0"?>
+<sdf version="1.9">
+  <model name="robot">
+    <link name="base">
+      <visual name="v"><geometry>
+        <mesh><uri>{abs_mesh_path}</uri></mesh>
+      </geometry></visual>
+    </link>
+  </model>
+</sdf>
+""")
+
+        # World that includes the model
+        sdf = tmp_path / "world.sdf"
+        sdf.write_text("""\
+<?xml version="1.0"?>
+<sdf version="1.9">
+  <world name="w">
+    <include><uri>model://robot</uri></include>
+  </world>
+</sdf>
+""")
+
+        crawler = SDFCrawler(sdf)
+        crawler.collect()
+        output = tmp_path / "test.sdfz"
+        write_bundle(sdf, crawler, output)
+
+        with zipfile.ZipFile(output, "r") as zf:
+            # The nested model.sdf should NOT contain the absolute path
+            nested_sdf = zf.read("models/robot/model.sdf").decode("utf-8")
+            assert abs_mesh_path not in nested_sdf
+
+    def test_exported_absolute_paths_get_rewritten(self, tmp_path, clean_env):
+        """Simulate generate_world_sdf output with absolute paths."""
+        import zipfile
+
+        (tmp_path / ".git").mkdir()
+        textures = tmp_path / "materials" / "textures"
+        textures.mkdir(parents=True)
+        (textures / "ground.png").write_text("")
+
+        abs_tex_path = str(textures / "ground.png")
+
+        sdf = tmp_path / "exported.sdf"
+        sdf.write_text(f"""\
+<?xml version="1.0"?>
+<sdf version="1.9">
+  <world name="w">
+    <model name="floor">
+      <link name="l"><visual name="v"><material><pbr><metal>
+        <albedo_map>{abs_tex_path}</albedo_map>
+      </metal></pbr></material></visual></link>
+    </model>
+  </world>
+</sdf>
+""")
+
+        crawler = SDFCrawler(sdf)
+        crawler.collect()
+        output = tmp_path / "test.sdfz"
+        write_bundle(sdf, crawler, output)
+
+        with zipfile.ZipFile(output, "r") as zf:
+            world = zf.read("world.sdf").decode("utf-8")
+            assert abs_tex_path not in world
+            assert "ground.png" in world

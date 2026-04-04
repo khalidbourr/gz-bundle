@@ -139,6 +139,7 @@ class SDFCrawler:
         self.assets = {}       # dest_relative_path -> absolute_source_path
         self.rewrites = {}     # original_uri -> new_relative_uri
         self.unresolved = []
+        self._crawled = set()  # absolute paths already crawled (cycle guard)
 
     def log(self, msg):
         if self.verbose:
@@ -152,6 +153,10 @@ class SDFCrawler:
         self._crawl_sdf(self.root_sdf)
 
     def _crawl_sdf(self, sdf_path: Path):
+        resolved = sdf_path.resolve()
+        if resolved in self._crawled:
+            return
+        self._crawled.add(resolved)
         self.log(f"Crawling {sdf_path}")
         try:
             tree = ET.parse(sdf_path)
@@ -202,6 +207,10 @@ class SDFCrawler:
         for plugin_el in root.iter("plugin"):
             fn = plugin_el.get("filename")
             if fn:
+                # Skip gz-sim built-in plugins (ship with Gazebo)
+                if fn.startswith(("gz-sim-", "ignition-gazebo-")):
+                    self.log(f"Skipping built-in plugin: {fn}")
+                    continue
                 resolved = resolve_plugin(fn, self.plugin_paths)
                 if resolved:
                     dest = self._add_asset(resolved, "plugins")
@@ -278,13 +287,18 @@ class SDFCrawler:
         return dest_rel
 
     def _add_directory(self, src_dir: Path, dest_prefix: str):
-        """Recursively register all files in a directory."""
+        """Recursively register all files in a directory and crawl nested SDFs."""
+        sdf_files = []
         for f in src_dir.rglob("*"):
             if f.is_file():
                 rel = f.relative_to(src_dir.parent)
                 dest_rel = f"{dest_prefix}/{'/'.join(rel.parts[1:])}"
                 self.assets[dest_rel] = f
                 self.log(f"  + {dest_rel}")
+                if f.suffix in (".sdf", ".world") and f != self.root_sdf:
+                    sdf_files.append(f)
+        for sdf_file in sdf_files:
+            self._crawl_sdf(sdf_file)
 
     def _register_rewrite(self, original_uri: str, new_rel: str):
         self.rewrites[original_uri] = new_rel
@@ -447,7 +461,11 @@ def write_bundle(sdf_path: Path, crawler: SDFCrawler, output: Path,
             if dest_rel == sdf_entry:
                 continue  # already written as rewritten SDF
             try:
-                zf.write(src_path, dest_rel)
+                if src_path.suffix in (".sdf", ".world") and crawler.rewrites:
+                    rewritten = rewrite_sdf(src_path, crawler.rewrites)
+                    zf.writestr(dest_rel, rewritten)
+                else:
+                    zf.write(src_path, dest_rel)
                 if verbose:
                     print(f"  + {dest_rel} ({src_path.stat().st_size // 1024} KB)")
                 ok += 1
