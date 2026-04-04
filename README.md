@@ -15,11 +15,11 @@ python3 forest3d.sdfz
 
 ### World bundling
 
-<video src="world.mp4" width="100%"></video>
+https://github.com/khalidbourr/gz-bundle/blob/master/world.mp4
 
 ### Model bundling
 
-<video src="model.mp4" width="100%"></video>
+https://github.com/khalidbourr/gz-bundle/blob/master/model.mp4
 
 ## Requirements
 
