@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """
-gz_bundle — Gazebo SDF World Bundler
+gz_bundle — Gazebo SDF Bundler
 
-Packs a .sdf world and all referenced assets (meshes, textures, PBR maps,
-nested models, plugins) into a portable .sdfz archive (uncompressed ZIP,
-uncompressed).  URIs in the output SDF are rewritten to relative paths.
+Packs a .sdf world or model and all referenced assets (meshes, textures,
+PBR maps, nested models, plugins) into a portable .sdfz archive
+(ZIP_STORED, uncompressed).  URIs in the output SDF are rewritten to
+relative paths.
 
 Usage:
     python3 gz_bundle.py world.sdf -o forest3d.sdfz
+    python3 gz_bundle.py models/robot/model.sdf -o robot.sdfz
     python3 gz_bundle.py --run forest3d.sdfz
 """
 
@@ -288,6 +290,38 @@ class SDFCrawler:
         self.rewrites[original_uri] = new_rel
 
 
+def detect_sdf_type(sdf_path: Path) -> str:
+    """Return 'model' if the SDF describes a model, otherwise 'world'."""
+    try:
+        tree = ET.parse(sdf_path)
+        root = tree.getroot()
+        if root.find("model") is not None and root.find("world") is None:
+            return "model"
+    except ET.ParseError:
+        pass
+    if sdf_path.name == "model.sdf":
+        return "model"
+    return "world"
+
+
+def generate_wrapper_world(model_name: str) -> str:
+    """Generate a minimal world SDF that includes a bundled model."""
+    return textwrap.dedent(f"""\
+        <?xml version="1.0"?>
+        <sdf version="1.9">
+          <world name="{model_name}_preview">
+            <include>
+              <uri>model://{model_name}</uri>
+            </include>
+            <light type="directional" name="sun">
+              <cast_shadows>true</cast_shadows>
+              <direction>-0.5 0.1 -0.9</direction>
+            </light>
+          </world>
+        </sdf>
+    """)
+
+
 # --- SDF rewriter ----------------------------------------------------------
 
 def rewrite_sdf(sdf_path: Path, rewrites: dict) -> str:
@@ -300,7 +334,8 @@ def rewrite_sdf(sdf_path: Path, rewrites: dict) -> str:
 
 # --- Bundle writer ---------------------------------------------------------
 
-def write_bundle(sdf_path: Path, crawler: SDFCrawler, output: Path, verbose=False):
+def write_bundle(sdf_path: Path, crawler: SDFCrawler, output: Path,
+                  bundle_type="world", model_name=None, verbose=False):
     """Write the .sdfz archive (ZIP_STORED, uncompressed)."""
     print(f"\nWriting bundle: {output}")
 
@@ -311,7 +346,7 @@ def write_bundle(sdf_path: Path, crawler: SDFCrawler, output: Path, verbose=Fals
         from pathlib import Path
 
         sdfz_path = Path(sys.argv[0]).resolve()
-        print(f"gz_bundle — Gazebo World Bundle Runner")
+        print(f"gz_bundle — Gazebo Bundle Runner")
         print(f"Bundle : {sdfz_path}")
 
         mount_dir = Path(tempfile.mkdtemp(prefix="gz_bundle_"))
@@ -335,7 +370,27 @@ def write_bundle(sdf_path: Path, crawler: SDFCrawler, output: Path, verbose=Fals
 
         manifest_path = mount_dir / "manifest.json"
         manifest = json.loads(manifest_path.read_text()) if manifest_path.exists() else {}
-        world_sdf     = mount_dir / manifest.get("world_sdf", "world.sdf")
+        bundle_type = manifest.get("type", "world")
+
+        if bundle_type == "model":
+            model_name = manifest.get("model_name", "model")
+            world_sdf = mount_dir / "_preview_world.sdf"
+            world_sdf.write_text(
+                f'<?xml version="1.0"?>\\n'
+                f'<sdf version="1.9">\\n'
+                f'  <world name="{model_name}_preview">\\n'
+                f'    <include><uri>model://{model_name}</uri></include>\\n'
+                f'    <light type="directional" name="sun">\\n'
+                f'      <cast_shadows>true</cast_shadows>\\n'
+                f'      <direction>-0.5 0.1 -0.9</direction>\\n'
+                f'    </light>\\n'
+                f'  </world>\\n'
+                f'</sdf>\\n'
+            )
+            print(f"Model bundle — generated preview world for '{model_name}'")
+        else:
+            world_sdf = mount_dir / manifest.get("world_sdf", "world.sdf")
+
         plugin_path   = str(mount_dir / "plugins")
         resource_path = f"{mount_dir}:{mount_dir / 'models'}"
 
@@ -378,11 +433,19 @@ def write_bundle(sdf_path: Path, crawler: SDFCrawler, output: Path, verbose=Fals
         print(f"  + gz_bundle.py (bundler embedded)")
 
         rewritten_sdf = rewrite_sdf(sdf_path, crawler.rewrites)
-        zf.writestr("world.sdf", rewritten_sdf)
-        print(f"  + world.sdf ({len(rewritten_sdf)} bytes)")
+        if bundle_type == "model":
+            sdf_entry = f"models/{model_name}/model.sdf"
+            zf.writestr(sdf_entry, rewritten_sdf)
+            print(f"  + {sdf_entry} ({len(rewritten_sdf)} bytes)")
+        else:
+            sdf_entry = "world.sdf"
+            zf.writestr(sdf_entry, rewritten_sdf)
+            print(f"  + world.sdf ({len(rewritten_sdf)} bytes)")
 
         ok = 0
         for dest_rel, src_path in crawler.assets.items():
+            if dest_rel == sdf_entry:
+                continue  # already written as rewritten SDF
             try:
                 zf.write(src_path, dest_rel)
                 if verbose:
@@ -393,12 +456,16 @@ def write_bundle(sdf_path: Path, crawler: SDFCrawler, output: Path, verbose=Fals
 
         manifest = {
             "gz_bundle_version": "1.0",
-            "world_sdf": "world.sdf",
+            "type": bundle_type,
             "source_sdf": str(sdf_path),
             "assets": list(crawler.assets.keys()),
             "unresolved": crawler.unresolved,
             "rewrites": crawler.rewrites,
         }
+        if bundle_type == "model":
+            manifest["model_name"] = model_name
+        else:
+            manifest["world_sdf"] = "world.sdf"
         zf.writestr("manifest.json", json.dumps(manifest, indent=2))
 
     total_size = output.stat().st_size
@@ -435,7 +502,15 @@ def run_bundle(sdfz_path: Path, extra_args: list):
 
     manifest_path = mount_dir / "manifest.json"
     manifest = json.loads(manifest_path.read_text()) if manifest_path.exists() else {}
-    world_sdf = mount_dir / manifest.get("world_sdf", "world.sdf")
+    bundle_type = manifest.get("type", "world")
+
+    if bundle_type == "model":
+        model_name = manifest.get("model_name", "model")
+        world_sdf = mount_dir / "_preview_world.sdf"
+        world_sdf.write_text(generate_wrapper_world(model_name))
+        print(f"Model bundle — generated preview world for '{model_name}'")
+    else:
+        world_sdf = mount_dir / manifest.get("world_sdf", "world.sdf")
 
     env = os.environ.copy()
     resource_path = f"{mount_dir}:{mount_dir / 'models'}"
@@ -482,13 +557,14 @@ def run_bundle(sdfz_path: Path, extra_args: list):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="gz_bundle — Pack a Gazebo SDF world into a portable .sdfz archive",
+        description="gz_bundle — Pack a Gazebo SDF world or model into a portable .sdfz archive",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=textwrap.dedent("""\
             Examples:
               python3 gz_bundle.py world.sdf -o forest3d.sdfz
+              python3 gz_bundle.py models/robot/model.sdf -o robot.sdfz
               python3 gz_bundle.py --run forest3d.sdfz
-              python3 gz_bundle.py --run forest3d.sdfz -- -v
+              python3 gz_bundle.py --run robot.sdfz
         """),
     )
     parser.add_argument("sdf_or_bundle",
@@ -518,10 +594,22 @@ def main():
     if input_path.suffix not in (".sdf", ".world"):
         print(f"WARNING: {input_path} doesn't look like an SDF file", file=sys.stderr)
 
-    output = Path(args.output).expanduser().resolve() if args.output else input_path.with_suffix(".sdfz")
+    bundle_type = detect_sdf_type(input_path)
+    model_name = None
 
-    print(f"gz_bundle — Gazebo SDF World Bundler")
+    if bundle_type == "model":
+        model_name = input_path.resolve().parent.name
+        default_output = input_path.resolve().parent.with_suffix(".sdfz")
+    else:
+        default_output = input_path.with_suffix(".sdfz")
+
+    output = Path(args.output).expanduser().resolve() if args.output else default_output
+
+    print(f"gz_bundle — Gazebo SDF Bundler")
+    print(f"Type   : {bundle_type}")
     print(f"Input  : {input_path.resolve()}")
+    if model_name:
+        print(f"Model  : {model_name}")
     print(f"Output : {output}")
 
     discovered = get_resource_paths(input_path)
@@ -535,7 +623,15 @@ def main():
 
     crawler = SDFCrawler(input_path, verbose=args.verbose)
     crawler.collect()
-    write_bundle(input_path, crawler, output, verbose=args.verbose)
+
+    # For model bundles, also add the model's own directory
+    if bundle_type == "model":
+        model_dir = input_path.resolve().parent
+        crawler._add_directory(model_dir, f"models/{model_name}")
+
+    write_bundle(input_path, crawler, output,
+                 bundle_type=bundle_type, model_name=model_name,
+                 verbose=args.verbose)
 
     print(f"\nDone. Share {output.name} — run it with:")
     print(f"  python3 {output.name}")

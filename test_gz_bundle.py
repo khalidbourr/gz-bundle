@@ -8,11 +8,14 @@ from pathlib import Path
 import pytest
 
 from gz_bundle import (
+    detect_sdf_type,
     find_project_root,
+    generate_wrapper_world,
     get_resource_paths,
     resolve_file_uri,
     resolve_plugin,
     rewrite_sdf,
+    write_bundle,
     SDFCrawler,
 )
 
@@ -459,3 +462,129 @@ class TestNestedInclude:
         keys = list(crawler.assets.keys())
         assert any("car" in k and "chassis.dae" in k for k in keys)
         assert any("wheel" in k for k in keys)
+
+
+# --- detect_sdf_type -------------------------------------------------------
+
+class TestDetectSDFType:
+    def test_detects_world(self, tmp_path):
+        sdf = tmp_path / "forest.sdf"
+        sdf.write_text("""\
+<?xml version="1.0"?>
+<sdf version="1.9">
+  <world name="forest"><include><uri>model://tree</uri></include></world>
+</sdf>
+""")
+        assert detect_sdf_type(sdf) == "world"
+
+    def test_detects_model_by_content(self, tmp_path):
+        sdf = tmp_path / "robot.sdf"
+        sdf.write_text("""\
+<?xml version="1.0"?>
+<sdf version="1.9">
+  <model name="robot"><link name="base"/></model>
+</sdf>
+""")
+        assert detect_sdf_type(sdf) == "model"
+
+    def test_detects_model_by_filename(self, tmp_path):
+        sdf = tmp_path / "model.sdf"
+        sdf.write_text("<sdf/>")
+        assert detect_sdf_type(sdf) == "model"
+
+    def test_world_with_nested_models_is_world(self, tmp_path):
+        sdf = tmp_path / "w.sdf"
+        sdf.write_text("""\
+<?xml version="1.0"?>
+<sdf version="1.9">
+  <world name="w">
+    <model name="box"><link name="l"/></model>
+  </world>
+</sdf>
+""")
+        assert detect_sdf_type(sdf) == "world"
+
+
+# --- generate_wrapper_world ------------------------------------------------
+
+class TestGenerateWrapperWorld:
+    def test_contains_include(self):
+        output = generate_wrapper_world("robot")
+        assert "model://robot" in output
+        assert "robot_preview" in output
+
+    def test_has_light(self):
+        output = generate_wrapper_world("tree")
+        assert "<light" in output
+
+
+# --- Model bundling (end-to-end) -------------------------------------------
+
+class TestModelBundle:
+    def test_model_bundle_structure(self, tmp_path, clean_env):
+        """Pack a model.sdf and verify the .sdfz has the right layout."""
+        import zipfile
+
+        (tmp_path / ".git").mkdir()
+        robot = tmp_path / "models" / "robot"
+        meshes = robot / "meshes"
+        meshes.mkdir(parents=True)
+        (robot / "model.sdf").write_text("""\
+<?xml version="1.0"?>
+<sdf version="1.9">
+  <model name="robot">
+    <link name="base">
+      <visual name="v"><geometry>
+        <mesh><uri>meshes/body.dae</uri></mesh>
+      </geometry></visual>
+    </link>
+  </model>
+</sdf>
+""")
+        (meshes / "body.dae").write_text("")
+        (robot / "model.config").write_text("<model/>")
+
+        sdf = robot / "model.sdf"
+        output = tmp_path / "robot.sdfz"
+
+        crawler = SDFCrawler(sdf)
+        crawler.collect()
+        crawler._add_directory(robot, "models/robot")
+        write_bundle(sdf, crawler, output, bundle_type="model", model_name="robot")
+
+        with zipfile.ZipFile(output, "r") as zf:
+            names = zf.namelist()
+            assert "__main__.py" in names
+            assert "manifest.json" in names
+            assert "models/robot/model.sdf" in names
+            assert any("body.dae" in n for n in names)
+
+            import json
+            manifest = json.loads(zf.read("manifest.json"))
+            assert manifest["type"] == "model"
+            assert manifest["model_name"] == "robot"
+
+    def test_model_bundle_no_world_sdf(self, tmp_path, clean_env):
+        """Model bundles should not contain a top-level world.sdf."""
+        import zipfile
+
+        (tmp_path / ".git").mkdir()
+        robot = tmp_path / "models" / "robot"
+        robot.mkdir(parents=True)
+        (robot / "model.sdf").write_text("""\
+<?xml version="1.0"?>
+<sdf version="1.9">
+  <model name="robot"><link name="base"/></model>
+</sdf>
+""")
+
+        sdf = robot / "model.sdf"
+        output = tmp_path / "robot.sdfz"
+
+        crawler = SDFCrawler(sdf)
+        crawler.collect()
+        crawler._add_directory(robot, "models/robot")
+        write_bundle(sdf, crawler, output, bundle_type="model", model_name="robot")
+
+        with zipfile.ZipFile(output, "r") as zf:
+            assert "world.sdf" not in zf.namelist()
