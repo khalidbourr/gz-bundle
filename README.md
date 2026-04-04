@@ -95,9 +95,9 @@ No `export GZ_SIM_RESOURCE_PATH` needed. The bundler finds models by walking up 
 
 ## Known limitations
 
-- **Plugins are platform-specific** — `.so` from Ubuntu x86_64 won't work elsewhere
-- **Fuel URIs** (`https://`) are left as-is — fetched by gz-sim at runtime
-- **Built-in plugins** (`gz-sim-physics-system`, etc.) are not bundled — they ship with Gazebo
+- **Plugins are platform-specific**, which means `.so` won't work elsewhere (to be arranged)
+- **Fuel URIs** (`https://fuel.gazebosim.org/...`) are left as-is and fetched by gz-sim at runtime. 
+- **Built-in plugins** (`gz-sim-physics-system`, etc.) ship with gazebo
 
 ## Roadmap
 
