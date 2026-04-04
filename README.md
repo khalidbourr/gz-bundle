@@ -46,9 +46,6 @@ python3 gz_bundle.py worlds/my_world.sdf -o my_world.sdfz
 
 # Pack a model
 
-https://github.com/user-attachments/assets/4ecbef38-d5dd-434e-bbe9-952eaea58563
-
-
 python3 gz_bundle.py models/tree/model.sdf -o tree.sdfz
 
 # Run (self-executing, no gz_bundle.py needed)
