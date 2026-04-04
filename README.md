@@ -14,10 +14,17 @@ python3 forest3d.sdfz
 ```
 
 ## World bundling
-https://github.com/user-attachments/assets/d051a386-2be7-4e35-a5ec-3a237feae293
+
+
+https://github.com/user-attachments/assets/1abb0b45-c482-4da3-a052-a6ad87a5d15e
+
+
 
 ## Model bundling
-https://github.com/user-attachments/assets/e7d2c80b-a9ba-462d-80dd-0a907cc73ec3
+
+
+https://github.com/user-attachments/assets/3190fa71-d172-4a46-b2b3-1e9bc9fb9515
+
 
  
 
@@ -38,6 +45,10 @@ sudo apt install fuse-zip   # optional
 python3 gz_bundle.py worlds/my_world.sdf -o my_world.sdfz
 
 # Pack a model
+
+https://github.com/user-attachments/assets/4ecbef38-d5dd-434e-bbe9-952eaea58563
+
+
 python3 gz_bundle.py models/tree/model.sdf -o tree.sdfz
 
 # Run (self-executing, no gz_bundle.py needed)
