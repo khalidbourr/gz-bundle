@@ -592,33 +592,31 @@ class TestModelBundle:
 # --- Nested SDF URI rewriting ----------------------------------------------
 
 class TestNestedSDFRewrite:
-    def test_nested_model_sdf_gets_rewritten(self, tmp_path, clean_env):
-        """model.sdf inside a bundled directory should have its URIs rewritten."""
+    def test_nested_model_sdf_preserved(self, tmp_path, clean_env):
+        """model.sdf inside a bundled directory should be left untouched."""
         import zipfile
 
         (tmp_path / ".git").mkdir()
 
-        # Model with an absolute path in its model.sdf
         robot = tmp_path / "models" / "robot"
         meshes = robot / "meshes"
         meshes.mkdir(parents=True)
         (meshes / "body.dae").write_text("")
 
-        abs_mesh_path = str(meshes / "body.dae")
-        (robot / "model.sdf").write_text(f"""\
+        original_content = """\
 <?xml version="1.0"?>
 <sdf version="1.9">
   <model name="robot">
     <link name="base">
       <visual name="v"><geometry>
-        <mesh><uri>{abs_mesh_path}</uri></mesh>
+        <mesh><uri>meshes/body.dae</uri></mesh>
       </geometry></visual>
     </link>
   </model>
 </sdf>
-""")
+"""
+        (robot / "model.sdf").write_text(original_content)
 
-        # World that includes the model
         sdf = tmp_path / "world.sdf"
         sdf.write_text("""\
 <?xml version="1.0"?>
@@ -635,9 +633,9 @@ class TestNestedSDFRewrite:
         write_bundle(sdf, crawler, output)
 
         with zipfile.ZipFile(output, "r") as zf:
-            # The nested model.sdf should NOT contain the absolute path
+            # Relative paths inside model dirs must be preserved as-is
             nested_sdf = zf.read("models/robot/model.sdf").decode("utf-8")
-            assert abs_mesh_path not in nested_sdf
+            assert "meshes/body.dae" in nested_sdf
 
     def test_exported_absolute_paths_get_rewritten(self, tmp_path, clean_env):
         """Simulate generate_world_sdf output with absolute paths."""

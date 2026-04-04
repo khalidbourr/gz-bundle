@@ -44,13 +44,7 @@ def find_project_root(sdf_path: Path) -> Path:
 
 
 def get_resource_paths(sdf_path: Path = None) -> list:
-    """Auto-discover model/asset directories in the project tree.
-
-    1. Find project root via marker files.
-    2. Scan for directories named models/model/assets/meshes or containing
-       model.sdf children.
-    3. Honour GZ_SIM_RESOURCE_PATH / IGN_GAZEBO_RESOURCE_PATH as overrides.
-    """
+    """Auto-discover model/asset directories in the project tree."""
     paths = []
 
     if sdf_path:
@@ -135,11 +129,10 @@ class SDFCrawler:
         self.resource_paths = get_resource_paths(sdf_path)
         self.plugin_paths = get_plugin_paths()
         self.verbose = verbose
-
-        self.assets = {}       # dest_relative_path -> absolute_source_path
-        self.rewrites = {}     # original_uri -> new_relative_uri
+        self.assets = {}
+        self.rewrites = {}
         self.unresolved = []
-        self._crawled = set()  # absolute paths already crawled (cycle guard)
+        self._crawled = set()
 
     def log(self, msg):
         if self.verbose:
@@ -149,7 +142,6 @@ class SDFCrawler:
         print(f"  [WARN]   {msg}", file=sys.stderr)
 
     def collect(self):
-        """Entry point — crawl the root SDF and all included SDFs."""
         self._crawl_sdf(self.root_sdf)
 
     def _crawl_sdf(self, sdf_path: Path):
@@ -167,7 +159,6 @@ class SDFCrawler:
         root = tree.getroot()
         sdf_dir = sdf_path.parent
 
-        # <include> tags — nested model SDFs
         for inc in root.iter("include"):
             uri_el = inc.find("uri")
             if uri_el is not None and uri_el.text:
@@ -185,7 +176,6 @@ class SDFCrawler:
                     self.warn(f"Unresolved include URI: {uri}")
                     self.unresolved.append(uri)
 
-        # <uri> tags — meshes, textures
         for uri_el in root.iter("uri"):
             if uri_el.text:
                 uri = uri_el.text.strip()
@@ -203,11 +193,9 @@ class SDFCrawler:
                     self.warn(f"Unresolved URI: {uri}")
                     self.unresolved.append(uri)
 
-        # <plugin filename="...">
         for plugin_el in root.iter("plugin"):
             fn = plugin_el.get("filename")
             if fn:
-                # Skip gz-sim built-in plugins (ship with Gazebo)
                 if fn.startswith(("gz-sim-", "ignition-gazebo-")):
                     self.log(f"Skipping built-in plugin: {fn}")
                     continue
@@ -220,7 +208,6 @@ class SDFCrawler:
                     self.warn(f"Plugin not found (platform-specific?): {fn}")
                     self.unresolved.append(f"plugin:{fn}")
 
-        # PBR texture maps
         pbr_tags = ["albedo_map", "normal_map", "roughness_map",
                     "metalness_map", "emissive_map", "light_map",
                     "roughness_metalness_map"]
@@ -236,7 +223,6 @@ class SDFCrawler:
                         self.warn(f"Unresolved texture <{tag}>: {uri}")
                         self.unresolved.append(uri)
 
-        # <texture> and <filename> inside <material>
         for tag in ["texture", "filename"]:
             for el in root.iter(tag):
                 if el.text and el.text.strip():
@@ -247,7 +233,6 @@ class SDFCrawler:
                         self._register_rewrite(uri, dest)
 
     def _resolve_any_uri(self, uri: str, sdf_dir: Path):
-        """Try model://, file://, then relative."""
         if uri.startswith("model://"):
             model_name = uri[len("model://"):].split("/")[0]
             for rp in self.resource_paths:
@@ -263,7 +248,6 @@ class SDFCrawler:
         return resolve_file_uri(uri, sdf_dir)
 
     def _guess_subdir(self, path: Path) -> str:
-        """Pick a destination subdirectory based on file extension."""
         ext = path.suffix.lower()
         if ext in (".dae", ".obj", ".stl", ".fbx", ".gltf", ".glb"):
             return "models/meshes"
@@ -278,7 +262,6 @@ class SDFCrawler:
         return "assets"
 
     def _add_asset(self, src: Path, subdir: str) -> str:
-        """Register a single file asset, return its relative dest path."""
         dest_rel = f"{subdir}/{src.name}"
         if dest_rel in self.assets and self.assets[dest_rel] != src:
             dest_rel = f"{subdir}/{src.parent.name}_{src.name}"
@@ -287,7 +270,6 @@ class SDFCrawler:
         return dest_rel
 
     def _add_directory(self, src_dir: Path, dest_prefix: str):
-        """Recursively register all files in a directory and crawl nested SDFs."""
         sdf_files = []
         for f in src_dir.rglob("*"):
             if f.is_file():
@@ -305,11 +287,12 @@ class SDFCrawler:
 
 
 def detect_sdf_type(sdf_path: Path) -> str:
-    """Return 'model' if the SDF describes a model, otherwise 'world'."""
     try:
         tree = ET.parse(sdf_path)
         root = tree.getroot()
-        if root.find("model") is not None and root.find("world") is None:
+        if root.find("world") is not None:
+            return "world"
+        if root.find("model") is not None:
             return "model"
     except ET.ParseError:
         pass
@@ -319,7 +302,6 @@ def detect_sdf_type(sdf_path: Path) -> str:
 
 
 def generate_wrapper_world(model_name: str) -> str:
-    """Generate a minimal world SDF that includes a bundled model."""
     return textwrap.dedent(f"""\
         <?xml version="1.0"?>
         <sdf version="1.9">
@@ -339,7 +321,6 @@ def generate_wrapper_world(model_name: str) -> str:
 # --- SDF rewriter ----------------------------------------------------------
 
 def rewrite_sdf(sdf_path: Path, rewrites: dict) -> str:
-    """Read SDF as text and apply all URI rewrites."""
     text = sdf_path.read_text(encoding="utf-8")
     for original, new_rel in rewrites.items():
         text = text.replace(original, new_rel)
@@ -350,12 +331,10 @@ def rewrite_sdf(sdf_path: Path, rewrites: dict) -> str:
 
 def write_bundle(sdf_path: Path, crawler: SDFCrawler, output: Path,
                   bundle_type="world", model_name=None, verbose=False):
-    """Write the .sdfz archive (ZIP_STORED, uncompressed)."""
     print(f"\nWriting bundle: {output}")
 
     main_py = textwrap.dedent("""\
         #!/usr/bin/env python3
-        \"\"\"Self-executing .sdfz bundle.  Run with: python3 <name>.sdfz\"\"\"
         import sys, os, shutil, subprocess, json, tempfile
         from pathlib import Path
 
@@ -401,7 +380,7 @@ def write_bundle(sdf_path: Path, crawler: SDFCrawler, output: Path,
                 f'  </world>\\n'
                 f'</sdf>\\n'
             )
-            print(f"Model bundle — generated preview world for '{model_name}'")
+            print(f"Model bundle — preview world for '{model_name}'")
         else:
             world_sdf = mount_dir / manifest.get("world_sdf", "world.sdf")
 
@@ -440,30 +419,27 @@ def write_bundle(sdf_path: Path, crawler: SDFCrawler, output: Path,
     """)
 
     with zipfile.ZipFile(output, "w", zipfile.ZIP_STORED) as zf:
-        zf.writestr("__main__.py", main_py)
-        print(f"  + __main__.py (self-run bootstrap)")
-
-        zf.write(Path(__file__).resolve(), "gz_bundle.py")
-        print(f"  + gz_bundle.py (bundler embedded)")
-
         rewritten_sdf = rewrite_sdf(sdf_path, crawler.rewrites)
         if bundle_type == "model":
             sdf_entry = f"models/{model_name}/model.sdf"
-            zf.writestr(sdf_entry, rewritten_sdf)
-            print(f"  + {sdf_entry} ({len(rewritten_sdf)} bytes)")
         else:
             sdf_entry = "world.sdf"
-            zf.writestr(sdf_entry, rewritten_sdf)
-            print(f"  + world.sdf ({len(rewritten_sdf)} bytes)")
+        zf.writestr(sdf_entry, rewritten_sdf)
+        print(f"  + {sdf_entry} ({len(rewritten_sdf)} bytes)")
+
+        zf.writestr("__main__.py", main_py)
+        print(f"  + __main__.py")
+
+        zf.write(Path(__file__).resolve(), "gz_bundle.py")
+        print(f"  + gz_bundle.py")
 
         ok = 0
         for dest_rel, src_path in crawler.assets.items():
             if dest_rel == sdf_entry:
-                continue  # already written as rewritten SDF
+                continue
             try:
-                if src_path.suffix in (".sdf", ".world") and crawler.rewrites:
-                    rewritten = rewrite_sdf(src_path, crawler.rewrites)
-                    zf.writestr(dest_rel, rewritten)
+                if src_path.suffix in (".sdf", ".world") and not dest_rel.startswith("models/"):
+                    zf.writestr(dest_rel, rewrite_sdf(src_path, crawler.rewrites))
                 else:
                     zf.write(src_path, dest_rel)
                 if verbose:
@@ -473,7 +449,7 @@ def write_bundle(sdf_path: Path, crawler: SDFCrawler, output: Path,
                 print(f"  ! {dest_rel}: {e}", file=sys.stderr)
 
         manifest = {
-            "gz_bundle_version": "1.0",
+            "gz_bundle_version": "1.1",
             "type": bundle_type,
             "source_sdf": str(sdf_path),
             "assets": list(crawler.assets.keys()),
@@ -499,7 +475,6 @@ def write_bundle(sdf_path: Path, crawler: SDFCrawler, output: Path,
 # --- Bundle runner ---------------------------------------------------------
 
 def run_bundle(sdfz_path: Path, extra_args: list):
-    """Mount .sdfz via fuse-zip (zero-copy) or fall back to extraction."""
     mount_dir = Path(tempfile.mkdtemp(prefix="gz_bundle_"))
     used_fuse = False
 
@@ -526,7 +501,7 @@ def run_bundle(sdfz_path: Path, extra_args: list):
         model_name = manifest.get("model_name", "model")
         world_sdf = mount_dir / "_preview_world.sdf"
         world_sdf.write_text(generate_wrapper_world(model_name))
-        print(f"Model bundle — generated preview world for '{model_name}'")
+        print(f"Model bundle — preview world for '{model_name}'")
     else:
         world_sdf = mount_dir / manifest.get("world_sdf", "world.sdf")
 
@@ -597,7 +572,6 @@ def main():
     args, extra = parser.parse_known_args()
     input_path = Path(args.sdf_or_bundle)
 
-    # Run mode
     if args.run or input_path.suffix == ".sdfz":
         if not input_path.exists():
             print(f"ERROR: {input_path} not found", file=sys.stderr)
@@ -605,7 +579,6 @@ def main():
         run_bundle(input_path, [a for a in extra if a != "--"])
         return
 
-    # Pack mode
     if not input_path.exists():
         print(f"ERROR: {input_path} not found", file=sys.stderr)
         sys.exit(1)
@@ -642,10 +615,15 @@ def main():
     crawler = SDFCrawler(input_path, verbose=args.verbose)
     crawler.collect()
 
-    # For model bundles, also add the model's own directory
     if bundle_type == "model":
         model_dir = input_path.resolve().parent
-        crawler._add_directory(model_dir, f"models/{model_name}")
+        dest_prefix = f"models/{model_name}"
+        for f in model_dir.rglob("*"):
+            if f.is_file():
+                rel = f.relative_to(model_dir.parent)
+                dest_rel = f"{dest_prefix}/{'/'.join(rel.parts[1:])}"
+                if dest_rel not in crawler.assets:
+                    crawler.assets[dest_rel] = f
 
     write_bundle(input_path, crawler, output,
                  bundle_type=bundle_type, model_name=model_name,
