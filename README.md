@@ -13,6 +13,14 @@ python3 gz_bundle.py models/robot/model.sdf -o robot.sdfz
 python3 forest3d.sdfz
 ```
 
+### World bundling
+
+<video src="world.mp4" width="100%"></video>
+
+### Model bundling
+
+<video src="model.mp4" width="100%"></video>
+
 ## Requirements
 
 - Python 3.6+ (stdlib only, no pip packages)
